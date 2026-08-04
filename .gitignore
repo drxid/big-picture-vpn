@@ -1,0 +1,42 @@
+# Editor/agent tooling: local to whoever is working on the project.
+.claude/
+
+# dependencies / build output
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Built executable, copied out of target/ so Steam has a stable path to it.
+release/
+
+# Screenshots and snapshots taken while iterating on the interface and artwork.
+.playwright-mcp/
+ui-*.png
+art-*.png
+*-icon-check.png
+ico-*.png
+*-dataurl.txt
+
+# Script output. Deliberately ignored: these contain the machine's external IP,
+# the account SID and raw service security descriptors -- machine-specific data
+# that must not end up in a public repository.
+scripts/backup/
+scripts/*.log
+scripts/test-result.log
+scripts/setup-output.txt
+scripts/grant-output.txt
+scripts/task-setup-output.txt
+scripts/tunnels-inventory.txt
+scripts/service-sddl-backup.txt
+
+# local app state
+.vite/
+*.local
+
+# editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

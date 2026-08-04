@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Big Picture VPN — Steam artwork</title>
+    <!--
+      Source for the Steam library artwork. Each layout is rendered by loading
+      this file at the exact target resolution and screenshotting the viewport,
+      so what ships is pixel-identical to what is designed here.
+
+      The visual language is lifted straight from the app: near-black ground, a
+      single green beacon, and Segoe UI Variable set tight. The beacon is the
+      mark -- it is the one element a user already associates with "the tunnel
+      is up" after using the app once.
+
+      Layout is chosen by the URL hash: #vertical, #horizontal, #hero, #logo,
+      #icon.
+    -->
+    <style>
+      :root {
+        --bg: #0a0a0b;
+        --text: #f4f4f5;
+        --dim: #8b8b93;
+        --faint: #5c5c64;
+        --live: #4ade80;
+        --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui,
+          sans-serif;
+        --font-text: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font-text);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body.transparent,
+      body.transparent .stage {
+        background: transparent;
+      }
+
+      .stage {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: var(--bg);
+        overflow: hidden;
+        display: none;
+      }
+
+      body[data-layout="vertical"] .stage-vertical,
+      body[data-layout="horizontal"] .stage-horizontal,
+      body[data-layout="hero"] .stage-hero,
+      body[data-layout="logo"] .stage-logo,
+      body[data-layout="icon"] .stage-icon {
+        display: flex;
+      }
+
+      /* The same wash the app uses behind its status line. */
+      .glow {
+        position: absolute;
+        border-radius: 50%;
+        background: #1f9d55;
+        filter: blur(120px);
+        opacity: 0.28;
+        pointer-events: none;
+      }
+
+      .beacon {
+        border-radius: 50%;
+        background: var(--live);
+        flex: none;
+      }
+
+      .wordmark {
+        font-family: var(--font-display);
+        font-weight: 700;
+        letter-spacing: -0.035em;
+        line-height: 0.95;
+      }
+
+      .eyebrow {
+        text-transform: uppercase;
+        color: var(--faint);
+        font-weight: 600;
+      }
+
+      .tagline {
+        color: var(--dim);
+      }
+
+      /* --- vertical: 600x900 library capsule ------------------------------ */
+
+      .stage-vertical {
+        flex-direction: column;
+        justify-content: flex-end;
+        /* Lifted off the bottom edge: Steam rounds the capsule corners and can
+           overlay a title bar along the lower edge, so text sitting right on
+           it is the first thing to get clipped. */
+        padding: 8% 8% 17%;
+      }
+
+      .stage-vertical .glow {
+        width: 130%;
+        height: 60%;
+        top: -22%;
+        left: -30%;
+      }
+
+      .stage-vertical .beacon {
+        width: 4.2%;
+        aspect-ratio: 1;
+        margin-bottom: 6%;
+        box-shadow: 0 0 0 3.2% rgba(74, 222, 128, 0.16);
+      }
+
+      .stage-vertical .wordmark {
+        font-size: 22.5cqw;
+      }
+
+      .stage-vertical .tagline {
+        margin-top: 5.5%;
+        font-size: 6.4cqw;
+        line-height: 1.3;
+      }
+
+      /* --- horizontal: 920x430 header ------------------------------------- */
+
+      .stage-horizontal {
+        align-items: center;
+        gap: 5%;
+        padding: 0 7%;
+      }
+
+      .stage-horizontal .glow {
+        width: 60%;
+        height: 220%;
+        top: -60%;
+        left: -18%;
+      }
+
+      .stage-horizontal .beacon {
+        width: 3.4%;
+        aspect-ratio: 1;
+        box-shadow: 0 0 0 2.6% rgba(74, 222, 128, 0.16);
+      }
+
+      .stage-horizontal .wordmark {
+        font-size: 11.5cqw;
+      }
+
+      .stage-horizontal .tagline {
+        margin-top: 2.4%;
+        font-size: 3.4cqw;
+      }
+
+      /* --- hero: 1920x620 -------------------------------------------------- */
+
+      /* Backdrop only. Steam lays the logo over the hero, so any wordmark here
+         would be printed twice -- the hero's job is to give that logo
+         something to sit on. */
+      .stage-hero {
+        background: linear-gradient(105deg, #0d1a14 0%, #0a1310 34%, var(--bg) 70%);
+      }
+
+      .stage-hero .glow {
+        width: 52%;
+        height: 320%;
+        top: -110%;
+        left: -14%;
+        opacity: 0.22;
+        filter: blur(160px);
+      }
+
+      .stage-hero .glow-far {
+        width: 34%;
+        height: 260%;
+        top: -80%;
+        left: 30%;
+        background: #0f6b8f;
+        opacity: 0.16;
+        filter: blur(170px);
+      }
+
+      /* --- logo: transparent ---------------------------------------------- */
+
+      .stage-logo {
+        align-items: center;
+        justify-content: center;
+        gap: 3%;
+        background: transparent;
+      }
+
+      .stage-logo .beacon {
+        width: 2.6%;
+        aspect-ratio: 1;
+      }
+
+      .stage-logo .wordmark {
+        font-size: 9.4cqw;
+        text-align: left;
+      }
+
+      /* --- icon: square ---------------------------------------------------- */
+
+      .stage-icon {
+        align-items: center;
+        justify-content: center;
+      }
+
+      .stage-icon .ring {
+        width: 62%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        border: 7% solid var(--live);
+        display: grid;
+        place-items: center;
+      }
+
+      .stage-icon .core {
+        width: 34%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: var(--live);
+      }
+
+      .stack {
+        position: relative;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- container queries make every size relative to the artwork itself, so
+         one set of rules serves all five resolutions -->
+    <div class="stage stage-vertical" style="container-type: size">
+      <span class="glow"></span>
+      <span class="beacon"></span>
+      <div class="stack">
+        <div class="wordmark">Big<br />Picture<br />VPN</div>
+        <div class="tagline">VPN с геймпада<br />прямо из Big&nbsp;Picture</div>
+      </div>
+    </div>
+
+    <div class="stage stage-horizontal" style="container-type: size">
+      <span class="glow"></span>
+      <span class="beacon"></span>
+      <div class="stack">
+        <div class="wordmark">Big Picture VPN</div>
+        <div class="tagline">Управляй VPN с геймпада</div>
+      </div>
+    </div>
+
+    <div class="stage stage-hero" style="container-type: size">
+      <span class="glow"></span>
+      <span class="glow glow-far"></span>
+    </div>
+
+    <div class="stage stage-logo" style="container-type: size">
+      <span class="beacon"></span>
+      <div class="wordmark">Big Picture<br />VPN</div>
+    </div>
+
+    <div class="stage stage-icon" style="container-type: size">
+      <div class="ring"><div class="core"></div></div>
+    </div>
+
+    <script>
+      function applyLayout() {
+        const layout = (location.hash || "#vertical").slice(1);
+        document.body.dataset.layout = layout;
+        document.body.classList.toggle("transparent", layout === "logo");
+      }
+      applyLayout();
+      addEventListener("hashchange", applyLayout);
+    </script>
+  </body>
+</html>

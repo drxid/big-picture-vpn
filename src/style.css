@@ -1,0 +1,91 @@
+:root {
+  color-scheme: dark;
+
+  /* Palette. Each colour has exactly one job: yellow marks what the pad is
+     pointing at, green means a tunnel is carrying traffic. Nothing else is
+     allowed to be either colour, so the screen never reads as a traffic light. */
+  --bg: #0a0a0b;
+  --surface: #0f0f11;
+  --surface-raised: #141417;
+  --border: #26262a;
+  --border-strong: #34343a;
+  --text: #f4f4f5;
+  --text-dim: #8b8b93;
+  --text-faint: #5c5c64;
+  /* Secondary controls: readable grey, brighter than --text-faint so they do
+     not look disabled, dimmer than the primary actions. */
+  --text-muted: #9a9aa3;
+  --glyph-muted: #6e6e78;
+  --accent: #f5c451;
+  --live: #4ade80;
+  --danger: #f2777a;
+
+  /* Segoe UI Variable ships with Windows 11, so the app looks native and
+     needs no font downloaded at runtime. */
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-text: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+
+  /* Everything scales off the viewport: this is read from a sofa, and the
+     window is always fullscreen at whatever the display runs at.
+
+     Calibrated so 2560x1440 -- where the layout was tuned -- lands on 26px,
+     and every other resolution keeps the same proportions: 19.5px at 1080p,
+     39px at 4K. Taking the smaller of the width- and height-derived values
+     keeps an ultrawide from blowing the type up past what its height can
+     carry. The clamp bounds are deliberately far outside the range of real
+     displays; they exist so a tiny or absurd window degrades gracefully
+     rather than to cap normal ones. */
+  font-size: clamp(13px, min(1.0156vw, 1.8056vh), 46px);
+  font-family: var(--font-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The cursor follows whichever device was last used: hidden on startup and
+   whenever the pad is touched, restored as soon as the mouse moves. `.pointer`
+   is toggled by the app. */
+.screen {
+  cursor: none;
+}
+
+.screen.pointer {
+  cursor: default;
+}
+
+.screen.pointer button {
+  cursor: pointer;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

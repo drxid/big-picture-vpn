@@ -1,0 +1,12 @@
+# Normalise line endings so the repo stays consistent when it lands on GitHub.
+* text=auto eol=lf
+
+# PowerShell scripts stay CRLF: they are Windows-only and some tooling is
+# picky about it. They are also ASCII-only by design, because PowerShell 5.1
+# reads .ps1 as ANSI when there is no BOM.
+*.ps1 text eol=crlf
+
+# Binary assets must not be touched.
+*.png binary
+*.ico binary
+*.icns binary
