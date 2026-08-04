@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Gamepad-driven AmneziaWG VPN toggle for Steam Big Picture",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
