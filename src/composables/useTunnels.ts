@@ -1,8 +1,12 @@
-﻿import { computed, onMounted, onUnmounted, ref } from "vue";
+﻿import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { lang, t } from "../i18n";
+
+export type Provider = "amneziawg" | "happ";
 
 export interface Tunnel {
   name: string;
+  provider: Provider;
   serviceName: string;
   displayName: string;
   configPath: string | null;
@@ -12,6 +16,11 @@ export interface Tunnel {
 
 const STORAGE_SELECTED = "bpvpn.selected";
 const STORAGE_AUTOCONNECT = "bpvpn.autoConnect";
+const STORAGE_ORDER = "bpvpn.order";
+
+/// What leads the list. "name" is the backend's order; the rest pull one group
+/// to the front and leave the order inside each group alone.
+export type TunnelOrder = "name" | "running" | Provider;
 
 /// Status is cheap to read (a service query, no network), so polling keeps the
 /// display honest even when the tunnel is changed from outside the app.
@@ -26,6 +35,7 @@ const USE_FIXTURES = import.meta.env.DEV && !HAS_TAURI;
 let fixtures: Tunnel[] = [
   {
     name: "-PC",
+    provider: "amneziawg",
     serviceName: "AmneziaWGTunnel$-PC",
     displayName: "AmneziaWG Tunnel: -PC",
     configPath: null,
@@ -34,8 +44,27 @@ let fixtures: Tunnel[] = [
   },
   {
     name: "Amsterdam",
+    provider: "amneziawg",
     serviceName: "AmneziaWGTunnel$Amsterdam",
     displayName: "AmneziaWG Tunnel: Amsterdam",
+    configPath: null,
+    state: "Stopped",
+    running: false,
+  },
+  {
+    name: "Frankfurt",
+    provider: "amneziawg",
+    serviceName: "AmneziaWGTunnel$Frankfurt",
+    displayName: "AmneziaWG Tunnel: Frankfurt",
+    configPath: null,
+    state: "Stopped",
+    running: false,
+  },
+  {
+    name: "Happ VPN",
+    provider: "happ",
+    serviceName: "HappService",
+    displayName: "Happ VPN",
     configPath: null,
     state: "Stopped",
     running: false,
@@ -68,16 +97,39 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
   return undefined as T;
 }
 
-export function useTunnels() {
-  const tunnels = ref<Tunnel[]>([]);
+export function useTunnels(options: { skipAutoConnect: boolean }) {
+  const list = ref<Tunnel[]>([]);
+  const order = ref<TunnelOrder>(
+    (localStorage.getItem(STORAGE_ORDER) as TunnelOrder | null) ?? "name",
+  );
   const selected = ref<string | null>(localStorage.getItem(STORAGE_SELECTED));
   const busy = ref(false);
   const error = ref<string | null>(null);
   const ready = ref(false);
+  /// True once the slow inventory is in, so the list is known to be complete.
+  const scanned = ref(false);
   /// The tunnel currently being connected, if any.
   const pending = ref<string | null>(null);
+  /// The tunnel being taken down, if any: by the off button, or by a switch.
+  const stopping = ref<string | null>(null);
 
   const autoConnect = ref(localStorage.getItem(STORAGE_AUTOCONNECT) !== "false");
+
+  const tunnels = computed(() => {
+    const leads = (t: Tunnel) =>
+      order.value === "name" ||
+      (order.value === "running" ? t.running : t.provider === order.value);
+    return [...list.value].sort((a, b) => Number(leads(b)) - Number(leads(a)));
+  });
+
+  /// A provider is only worth offering when there is another one to sort it
+  /// ahead of.
+  const orders = computed<TunnelOrder[]>(() => {
+    const providers = new Set(list.value.map((t) => t.provider));
+    return providers.size > 1
+      ? ["name", "running", "amneziawg", "happ"]
+      : ["name", "running"];
+  });
 
   const current = computed(
     () => tunnels.value.find((t) => t.name === selected.value) ?? null,
@@ -89,7 +141,7 @@ export function useTunnels() {
 
   async function refresh() {
     try {
-      tunnels.value = await call<Tunnel[]>("list_tunnels");
+      list.value = await call<Tunnel[]>("list_tunnels");
 
       // Keep the highlight pointing at something real, but never move it on
       // the user. It is a cursor now, not a mirror of what is running -- an
@@ -116,6 +168,11 @@ export function useTunnels() {
     localStorage.setItem(STORAGE_AUTOCONNECT, String(value));
   }
 
+  function setOrder(value: TunnelOrder) {
+    order.value = value;
+    localStorage.setItem(STORAGE_ORDER, value);
+  }
+
   async function run(action: () => Promise<void>) {
     if (busy.value) return;
     busy.value = true;
@@ -137,18 +194,26 @@ export function useTunnels() {
     if (!target) return;
     // Which card to animate. `busy` alone cannot say where the work is
     // happening, and during a switch the answer is not the running tunnel.
+    const previous = activeTunnel.value?.name ?? null;
     pending.value = target;
+    stopping.value = previous !== target ? previous : null;
     try {
       await run(() => call("switch_tunnel", { name: target }));
     } finally {
       pending.value = null;
+      stopping.value = null;
     }
   }
 
   async function turnOff() {
     const target = activeTunnel.value?.name ?? selected.value;
     if (!target) return;
-    await run(() => call("stop_tunnel", { name: target }));
+    stopping.value = target;
+    try {
+      await run(() => call("stop_tunnel", { name: target }));
+    } finally {
+      stopping.value = null;
+    }
   }
 
   async function toggle() {
@@ -187,8 +252,8 @@ export function useTunnels() {
       setSelected(previous);
       if (failure) {
         error.value = isOn.value
-          ? `${failure} Вернул «${previous}».`
-          : `${failure} Вернуть «${previous}» тоже не вышло.`;
+          ? `${failure} ${t.value.restored(previous)}`
+          : `${failure} ${t.value.restoreFailed(previous)}`;
       }
     }
   }
@@ -210,7 +275,11 @@ export function useTunnels() {
     await call("exit_app");
   }
 
+  watch(lang, (value) => void call("set_language", { lang: value }));
+
   onMounted(async () => {
+    void call("set_language", { lang: lang.value });
+
     // Show something immediately. Reading services from the registry is
     // instant, unlike everything below, which goes through the privileged
     // helper -- and a screen stuck on "checking" reads as a hang.
@@ -227,10 +296,13 @@ export function useTunnels() {
     } catch (e) {
       error.value = String(e);
     }
+    scanned.value = true;
 
     // Autostart: only acts when nothing is already up, so launching the app
-    // never disturbs a tunnel the user already had running.
-    if (autoConnect.value && !isOn.value && selected.value) {
+    // never disturbs a tunnel the user already had running. Never on the very
+    // first launch either: nobody asked for a VPN yet, they are still reading
+    // what the app does.
+    if (autoConnect.value && !isOn.value && selected.value && !options.skipAutoConnect) {
       await turnOn();
     }
 
@@ -252,8 +324,12 @@ export function useTunnels() {
     busy,
     error,
     ready,
+    scanned,
     pending,
+    stopping,
     autoConnect,
+    order,
+    orders,
     refresh,
     toggle,
     turnOn,
@@ -263,6 +339,7 @@ export function useTunnels() {
     canApply,
     step,
     setAutoConnect,
+    setOrder,
     exit,
   };
 }

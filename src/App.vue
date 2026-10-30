@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { useTunnels } from "./composables/useTunnels";
+import {
+  useTunnels,
+  type Provider,
+  type TunnelOrder,
+} from "./composables/useTunnels";
+import amneziawgLogo from "./assets/providers/amneziawg.svg";
+import happLogo from "./assets/providers/happ.svg";
 import {
   useGamepad,
   type PadButton,
@@ -8,6 +14,18 @@ import {
 } from "./composables/useGamepad";
 import ButtonGlyph from "./components/ButtonGlyph.vue";
 import AnimatedText from "./components/AnimatedText.vue";
+import OptionsMenu, { type MenuItem } from "./components/OptionsMenu.vue";
+import WelcomeScreen from "./components/WelcomeScreen.vue";
+import { LANGS, lang, languageName, setLang, t } from "./i18n";
+
+const WELCOMED_KEY = "bpvpn.welcomed";
+const firstLaunch = localStorage.getItem(WELCOMED_KEY) === null;
+const welcomeOpen = ref(firstLaunch);
+
+function closeWelcome() {
+  welcomeOpen.value = false;
+  localStorage.setItem(WELCOMED_KEY, "1");
+}
 
 const {
   tunnels,
@@ -17,15 +35,20 @@ const {
   busy,
   error,
   ready,
+  scanned,
   pending,
+  stopping,
   autoConnect,
+  order,
+  orders,
   turnOff,
   highlight,
   apply,
   step,
   setAutoConnect,
+  setOrder,
   exit,
-} = useTunnels();
+} = useTunnels({ skipAutoConnect: firstLaunch });
 
 /// True when the highlighted tunnel is the one carrying traffic. Everything the
 /// main button does and says follows from this.
@@ -53,7 +76,141 @@ function toggleScheme() {
   localStorage.setItem(SCHEME_KEY, manualScheme.value);
 }
 
+// --- options menu ----------------------------------------------------------
+
+const orderLabels = computed<Record<TunnelOrder, string>>(() => ({
+  name: t.value.orderName,
+  running: t.value.orderRunning,
+  amneziawg: "AmneziaWG",
+  happ: "Happ",
+}));
+
+const menuOpen = ref(false);
+const menuIndex = ref(0);
+
+const menuItems = computed<MenuItem[]>(() => [
+  {
+    id: "order",
+    label: t.value.menuOrder,
+    value: orderLabels.value[order.value],
+  },
+  {
+    id: "autoConnect",
+    label: t.value.menuAutoConnect,
+    value: autoConnect.value ? t.value.on : t.value.off,
+  },
+  {
+    id: "scheme",
+    label: t.value.menuScheme,
+    value: scheme.value === "xbox" ? "Xbox" : "PlayStation",
+  },
+  {
+    id: "language",
+    label: t.value.menuLanguage,
+    value: languageName(lang.value),
+  },
+  { id: "about", label: t.value.menuAbout },
+  { id: "exit", label: t.value.menuExit },
+]);
+
+const menuActionLabel = computed(() => {
+  const id = menuItems.value[menuIndex.value].id;
+  if (id === "exit") return t.value.actionExit;
+  return id === "about" ? t.value.actionOpen : t.value.actionChange;
+});
+
+function openMenu() {
+  menuIndex.value = 0;
+  menuOpen.value = true;
+}
+
+function moveMenu(direction: 1 | -1) {
+  const count = menuItems.value.length;
+  menuIndex.value = (menuIndex.value + direction + count) % count;
+}
+
+function changeItem(direction: 1 | -1) {
+  switch (menuItems.value[menuIndex.value].id) {
+    case "order": {
+      const count = orders.value.length;
+      const index = orders.value.indexOf(order.value);
+      setOrder(orders.value[(index + direction + count) % count]);
+      break;
+    }
+    case "autoConnect":
+      setAutoConnect(!autoConnect.value);
+      break;
+    case "scheme":
+      toggleScheme();
+      break;
+    case "language": {
+      const index = LANGS.indexOf(lang.value);
+      setLang(LANGS[(index + direction + LANGS.length) % LANGS.length]);
+      break;
+    }
+  }
+}
+
+/// A does the same as stepping right, so a row can be worked with one button --
+/// except the rows that act rather than hold a setting, which only answer to A:
+/// a stick pushed sideways must not be able to close the app.
+function confirmItem() {
+  const { id } = menuItems.value[menuIndex.value];
+  if (id === "exit") {
+    void exit();
+  } else if (id === "about") {
+    menuOpen.value = false;
+    welcomeOpen.value = true;
+  } else {
+    changeItem(1);
+  }
+}
+
+function pickItem(index: number) {
+  menuIndex.value = index;
+  confirmItem();
+}
+
+function pressInMenu(button: PadButton) {
+  switch (button) {
+    case "up":
+      moveMenu(-1);
+      break;
+    case "down":
+      moveMenu(1);
+      break;
+    case "left":
+      changeItem(-1);
+      break;
+    case "right":
+      changeItem(1);
+      break;
+    case "a":
+      confirmItem();
+      break;
+    case "b":
+    case "start":
+      menuOpen.value = false;
+      break;
+  }
+}
+
 function press(button: PadButton) {
+  if (welcomeOpen.value) {
+    if (button === "a") closeWelcome();
+    return;
+  }
+
+  // Ahead of the busy check: nothing in the menu touches the connection, so a
+  // tunnel still dialling is no reason to ignore it.
+  if (menuOpen.value) {
+    pressInMenu(button);
+    return;
+  }
+  if (button === "start") {
+    openMenu();
+    return;
+  }
   if (busy.value) return;
 
   switch (button) {
@@ -72,12 +229,6 @@ function press(button: PadButton) {
       if (name) highlight(name);
       break;
     }
-    case "start":
-      setAutoConnect(!autoConnect.value);
-      break;
-    case "b":
-      toggleScheme();
-      break;
   }
 }
 
@@ -125,11 +276,13 @@ const clock = ref("");
 let clockTimer: number | undefined;
 
 function tickClock() {
-  clock.value = new Date().toLocaleTimeString("ru-RU", {
+  clock.value = new Date().toLocaleTimeString(t.value.htmlLocale, {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
+
+watch(lang, tickClock);
 
 onMounted(() => {
   tickClock();
@@ -145,21 +298,54 @@ onUnmounted(() => {
 // --- copy ------------------------------------------------------------------
 
 const headline = computed(() => {
-  if (!ready.value) return "Проверяю";
-  if (busy.value) return isOn.value ? "Отключаю" : "Подключаю";
-  return isOn.value ? "Защищено" : "Без защиты";
+  if (!ready.value) return t.value.headlineChecking;
+  if (busy.value) {
+    return pending.value ? t.value.headlineConnecting : t.value.headlineDisconnecting;
+  }
+  return isOn.value ? t.value.headlineOn : t.value.headlineOff;
 });
 
 const subline = computed(() => {
-  if (!ready.value) return "Читаю состояние туннелей";
-  if (busy.value) return "Это займёт пару секунд";
-  if (isOn.value) return `Трафик идёт через ${activeTunnel.value?.name}`;
-  return "Трафик идёт напрямую, без туннеля";
+  if (!ready.value) return t.value.sublineChecking;
+  if (busy.value) return t.value.sublineBusy;
+  if (route.value) return route.value.text;
+  return t.value.sublineOff;
+});
+
+/// The sentence naming the active tunnel: the app with its logo, then its
+/// config. Happ has no config name to offer, only the server chosen inside it,
+/// so it stands alone. Its solid H also reads larger than the AmneziaWG line
+/// art at the same height, hence the smaller size.
+const route = computed(() => {
+  const tunnel = activeTunnel.value;
+  if (!ready.value || busy.value || !tunnel) return null;
+  const logo = logos[tunnel.provider];
+  const prefix = t.value.routePrefix;
+  if (tunnel.provider === "happ") {
+    return {
+      text: prefix + tunnel.name,
+      logo,
+      logoHeight: "0.95em",
+      configAt: undefined,
+    };
+  }
+  const app = "AmneziaWG ";
+  return {
+    text: prefix + app + tunnel.name,
+    logo,
+    logoHeight: "1.25em",
+    configAt: prefix.length + app.length,
+  };
 });
 
 const primaryLabel = computed(() =>
-  selectedIsLive.value ? "Выключить" : "Подключить",
+  selectedIsLive.value ? t.value.actionDisconnect : t.value.actionConnect,
 );
+
+const holdLabel = computed(() => {
+  if (holdProgress.value > 0) return t.value.actionHold;
+  return menuOpen.value ? t.value.actionClose : t.value.actionQuit;
+});
 
 /// Drives the ambient colour behind everything. It marks one state and one
 /// only -- protected and settled. Checking, connecting and sitting unprotected
@@ -169,16 +355,34 @@ const mood = computed(() =>
   ready.value && isOn.value && !busy.value ? "on" : "idle",
 );
 
+const logos: Record<Provider, string> = { amneziawg: amneziawgLogo, happ: happLogo };
+
 const isDev = import.meta.env.DEV;
 </script>
 
 <template>
-  <main class="screen" :class="[`mood-${mood}`, { pointer: pointerVisible }]">
+  <main
+    class="screen"
+    :class="[`mood-${mood}`, { pointer: pointerVisible, 'menu-open': menuOpen }]"
+  >
     <!-- Ambient wash. Purely decorative, hence aria-hidden and pointer-events
          none; it must never sit between the user and a control. -->
     <div class="ambient" aria-hidden="true">
       <span class="blob blob-a"></span>
     </div>
+
+    <!-- A watermark, only while protected. The sentence under the headline says
+         which app it is; this only keeps the empty side of the screen company. -->
+    <Transition name="mark">
+      <img
+        v-if="mood === 'on' && activeTunnel && !menuOpen && !welcomeOpen"
+        :key="activeTunnel.provider"
+        class="active-logo"
+        :src="logos[activeTunnel.provider]"
+        alt=""
+        aria-hidden="true"
+      />
+    </Transition>
 
     <header class="topbar">
       <span class="wordmark">Big&nbsp;Picture&nbsp;VPN</span>
@@ -186,12 +390,28 @@ const isDev = import.meta.env.DEV;
     </header>
 
     <div class="body">
+      <WelcomeScreen
+        v-if="welcomeOpen"
+        :tunnels="tunnels"
+        :scanned="scanned"
+        :logos="logos"
+      />
+      <template v-else>
       <section class="hero">
         <div class="state" :class="{ on: isOn, busy }">
           <span class="beacon" aria-hidden="true"></span>
           <h1 class="headline"><AnimatedText :text="headline" /></h1>
         </div>
-        <p class="subline"><AnimatedText :text="subline" :stagger="9" /></p>
+        <p class="subline">
+          <AnimatedText
+            :text="subline"
+            :stagger="9"
+            :icon="route?.logo"
+            :icon-at="t.routePrefix.length"
+            :icon-height="route?.logoHeight"
+            :bright-from="route?.configAt"
+          />
+        </p>
       </section>
 
       <!-- Fixed-height slot. Without it the hero sits centred while the list is
@@ -206,6 +426,7 @@ const isDev = import.meta.env.DEV;
             current: tunnel.name === selected,
             live: tunnel.running,
             connecting: tunnel.name === pending,
+            disconnecting: tunnel.name === stopping,
           }"
           :style="{ '--delay': `${index * 60}ms` }"
           @click="highlight(tunnel.name)"
@@ -214,29 +435,29 @@ const isDev = import.meta.env.DEV;
             <span class="card-dot" aria-hidden="true"></span>
             <span class="card-state">{{
               tunnel.name === pending
-                ? "Подключаю"
-                : tunnel.running
-                  ? "Работает"
-                  : "Остановлен"
+                ? t.cardConnecting
+                : tunnel.name === stopping
+                  ? t.cardDisconnecting
+                  : tunnel.running
+                    ? t.cardRunning
+                    : t.cardStopped
             }}</span>
           </span>
+          <img class="card-logo" :src="logos[tunnel.provider]" alt="" aria-hidden="true" />
           <span class="card-name">{{ tunnel.name }}</span>
         </button>
         </section>
 
         <section class="rail" v-else-if="ready">
           <div class="card placeholder">
-          <span class="card-name">Туннелей нет</span>
-          <span class="card-note">
-            Не нашёл ни одного конфига AmneziaWG. Если конфиги есть, значит не
-            установлена служебная задача — запусти от администратора:
-            scripts\setup-scheduled-task.ps1
-          </span>
+          <span class="card-name">{{ t.emptyTitle }}</span>
+          <span class="card-note">{{ t.emptyNote }}</span>
           </div>
         </section>
       </div>
 
       <p class="error" v-if="error">{{ error }}</p>
+      </template>
 
       <section class="diagnostic" v-if="isDev">
         <b>Отладка геймпада</b>
@@ -253,32 +474,57 @@ const isDev = import.meta.env.DEV;
       </section>
     </div>
 
+    <Transition name="menu">
+      <OptionsMenu
+        v-if="menuOpen"
+        :items="menuItems"
+        :index="menuIndex"
+        @pick="pickItem"
+      />
+    </Transition>
+
     <footer class="footbar">
       <div class="settings">
-        <button class="setting" @click="setAutoConnect(!autoConnect)">
+        <button class="setting" v-if="!welcomeOpen" @click="press('start')">
           <ButtonGlyph button="start" :scheme="scheme" />
-          <span>Автозапуск: {{ autoConnect ? "вкл" : "выкл" }}</span>
-        </button>
-        <button class="setting" @click="toggleScheme">
-          <ButtonGlyph button="b" :scheme="scheme" />
-          <span>Кнопки: {{ scheme === "xbox" ? "Xbox" : "PlayStation" }}</span>
+          <span>{{ t.menu }}</span>
         </button>
         <Transition name="fade">
           <span class="setting nudge" v-if="showHint && !connected">
-            Нажми любую кнопку на геймпаде
+            {{ t.pressAnyButton }}
           </span>
         </Transition>
       </div>
 
       <div class="actions">
-        <button class="action" v-if="tunnels.length > 1" @click="press('right')">
-          <ButtonGlyph button="leftright" :scheme="scheme" />
-          <span>Выбрать</span>
-        </button>
-        <button class="action" @click="primary()">
+        <button class="action" v-if="welcomeOpen" @click="press('a')">
           <ButtonGlyph button="a" :scheme="scheme" />
-          <span>{{ primaryLabel }}</span>
+          <span>{{ t.actionStart }}</span>
         </button>
+        <template v-else-if="menuOpen">
+          <button class="action" @click="press('a')">
+            <ButtonGlyph button="a" :scheme="scheme" />
+            <span>{{ menuActionLabel }}</span>
+          </button>
+        </template>
+        <template v-else>
+          <!-- Always in the layout. The list arrives after the footer has begun
+               its entrance, so adding the button then pops it in mid-fade and
+               shoves its neighbours aside. -->
+          <button
+            class="action"
+            :class="{ absent: tunnels.length < 2 }"
+            :disabled="tunnels.length < 2"
+            @click="press('right')"
+          >
+            <ButtonGlyph button="leftright" :scheme="scheme" />
+            <span>{{ t.actionSelect }}</span>
+          </button>
+          <button class="action" @click="primary()">
+            <ButtonGlyph button="a" :scheme="scheme" />
+            <span>{{ primaryLabel }}</span>
+          </button>
+        </template>
         <!-- Held, not clicked, with the mouse too: the confirmation the hold
              provides should not be bypassable just because a mouse is around. -->
         <button
@@ -287,9 +533,10 @@ const isDev = import.meta.env.DEV;
           @mousedown="beginPointerHold"
           @mouseup="endPointerHold"
           @mouseleave="endPointerHold"
+          @click="menuOpen && press('b')"
         >
-          <ButtonGlyph button="y" :scheme="scheme" :progress="holdProgress" />
-          <span>{{ holdProgress > 0 ? "Не отпускай" : "Выход" }}</span>
+          <ButtonGlyph button="b" :scheme="scheme" :progress="holdProgress" />
+          <span>{{ holdLabel }}</span>
         </button>
       </div>
     </footer>
@@ -306,6 +553,61 @@ const isDev = import.meta.env.DEV;
   padding: 3.2rem 4.4rem 2.6rem;
   gap: 1.6rem;
   isolation: isolate;
+}
+
+/* The screen stays visible behind the menu, so the list can be watched
+   reordering, but steps back so the eye goes to the panel. */
+.body {
+  transition: opacity 240ms ease;
+}
+
+.menu-open .body {
+  opacity: 0.32;
+}
+
+.menu-enter-active,
+.menu-leave-active {
+  transition: opacity 200ms ease, transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.menu-enter-from,
+.menu-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+/* --- active provider ------------------------------------------------------ */
+
+/* Faint enough to pass behind the card rail, however far the list runs. Colour
+   is dropped on purpose: at this opacity it would only read as dirt. */
+.active-logo {
+  position: absolute;
+  top: 50%;
+  right: 9rem;
+  z-index: -1;
+  height: min(58vh, 38rem);
+  width: auto;
+  transform: translateY(-50%);
+  filter: grayscale(1) brightness(1.5);
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.mark-enter-active {
+  transition: opacity 900ms ease, transform 900ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.mark-leave-active {
+  transition: opacity 240ms ease;
+}
+
+.mark-enter-from {
+  opacity: 0;
+  transform: translateY(-50%) scale(0.965);
+}
+
+.mark-leave-to {
+  opacity: 0;
 }
 
 /* --- ambient background -------------------------------------------------- */
@@ -581,6 +883,28 @@ const isDev = import.meta.env.DEV;
   gap: 0.5rem;
 }
 
+/* Colour on a logo means the same as colour anywhere else here: this one is
+   running. Until then it is only a label, so it stays grey and quiet. */
+.card-logo {
+  position: absolute;
+  top: 1.05rem;
+  right: 1.2rem;
+  height: 1.9rem;
+  width: auto;
+  filter: grayscale(1);
+  opacity: 0.32;
+  transition: filter 400ms ease, opacity 400ms ease;
+}
+
+.card.current .card-logo {
+  opacity: 0.6;
+}
+
+.card.live .card-logo {
+  filter: none;
+  opacity: 1;
+}
+
 .card-dot {
   width: 0.42rem;
   height: 0.42rem;
@@ -603,6 +927,12 @@ const isDev = import.meta.env.DEV;
   animation: breathe 1.8s ease-in-out infinite;
 }
 
+/* On the contents, not the card: redeclaring the card's own `animation` would
+   replay its entrance, the same trap as the connecting border above. */
+.card.disconnecting > * {
+  animation: breathe 800ms ease-in-out infinite;
+}
+
 .card-state {
   position: relative;
   font-size: 0.78rem;
@@ -611,7 +941,8 @@ const isDev = import.meta.env.DEV;
 }
 
 .card.live .card-state,
-.card.connecting .card-state {
+.card.connecting .card-state,
+.card.disconnecting .card-state {
   color: var(--text-dim);
 }
 
@@ -739,6 +1070,11 @@ const isDev = import.meta.env.DEV;
   background: none;
   border: none;
   color: var(--text);
+  transition: opacity 320ms ease;
+}
+
+.action.absent {
+  opacity: 0;
 }
 
 .action:focus-visible {

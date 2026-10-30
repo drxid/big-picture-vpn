@@ -1,3 +1,5 @@
+mod happ;
+mod i18n;
 mod tunnel;
 
 use tunnel::Tunnel;
@@ -36,6 +38,12 @@ fn stop_tunnel(name: String) -> Result<(), String> {
 #[tauri::command]
 fn switch_tunnel(name: String) -> Result<(), String> {
     tunnel::switch(&name)
+}
+
+/// Which language errors should come back in. The interface owns the choice.
+#[tauri::command]
+fn set_language(lang: String) {
+    i18n::set_language(&lang);
 }
 
 /// Needed because the app runs fullscreen on a TV, where the window has no
@@ -80,6 +88,7 @@ pub fn run() {
             start_tunnel,
             stop_tunnel,
             switch_tunnel,
+            set_language,
             exit_app
         ])
         .run(tauri::generate_context!())

@@ -31,10 +31,11 @@ const BUTTON_MAP: Record<number, PadButton> = {
   15: "right",
 };
 
-/// Y is never delivered as a tap: it is the exit button, and exiting has to be
-/// deliberate, so it only counts once held.
-const HOLD_BUTTON: PadButton = "y";
-const HOLD_INDEX = 3;
+/// B does two jobs: a tap closes the menu, a hold exits, and exiting has to be
+/// deliberate. So its tap is delivered on release, once it is known not to have
+/// been a hold -- delivered on press, a hold would close the menu on the way.
+const HOLD_BUTTON: PadButton = "b";
+const HOLD_INDEX = 1;
 const HOLD_MS = 2000;
 
 /// Stick deflection that counts as a press, and the point it has to fall back
@@ -43,9 +44,14 @@ const HOLD_MS = 2000;
 const AXIS_ON = 0.6;
 const AXIS_OFF = 0.35;
 
-/// The tunnel list is horizontal, so only the horizontal axes drive it: index 0
-/// is the left stick, index 2 the right one.
-const HORIZONTAL_AXES = [0, 2];
+/// The tunnel list is horizontal and the options menu vertical, so both sticks
+/// report both directions: 0 and 1 are the left stick, 2 and 3 the right one.
+const AXES: { index: number; negative: PadButton; positive: PadButton }[] = [
+  { index: 0, negative: "left", positive: "right" },
+  { index: 1, negative: "up", positive: "down" },
+  { index: 2, negative: "left", positive: "right" },
+  { index: 3, negative: "up", positive: "down" },
+];
 
 /// How long to wait before suggesting the user press something. Shown
 /// immediately it reads as an error message on a perfectly working app; the
@@ -121,19 +127,25 @@ export function useGamepad(handlers: {
         noteActivity();
         if (button !== HOLD_BUTTON) handlers.onPress(button);
       }
-    } else {
-      held.delete(key);
+    } else if (held.delete(key) && button === HOLD_BUTTON && !holdFired) {
+      handlers.onPress(button);
     }
   }
 
-  function axis(padIndex: number, axisIndex: number, value: number) {
+  function axis(
+    padIndex: number,
+    axisIndex: number,
+    value: number,
+    negative: PadButton,
+    positive: PadButton,
+  ) {
     const negKey = `${padIndex}:${axisIndex}:-`;
     const posKey = `${padIndex}:${axisIndex}:+`;
 
-    if (value <= -AXIS_ON) edge(negKey, true, "left");
+    if (value <= -AXIS_ON) edge(negKey, true, negative);
     else if (value > -AXIS_OFF) held.delete(negKey);
 
-    if (value >= AXIS_ON) edge(posKey, true, "right");
+    if (value >= AXIS_ON) edge(posKey, true, positive);
     else if (value < AXIS_OFF) held.delete(posKey);
   }
 
@@ -164,8 +176,8 @@ export function useGamepad(handlers: {
         lastRaw.value = `pad ${pad.index}: кнопки [${pressedIndices.join(", ")}]`;
       }
 
-      for (const axisIndex of HORIZONTAL_AXES) {
-        axis(pad.index, axisIndex, pad.axes[axisIndex] ?? 0);
+      for (const { index, negative, positive } of AXES) {
+        axis(pad.index, index, pad.axes[index] ?? 0, negative, positive);
       }
 
       snapshot.push({
@@ -210,15 +222,22 @@ export function useGamepad(handlers: {
   }
 
   /// The keyboard mirrors the pad so the app stays usable at a desk. Escape
-  /// mirrors the exit button, hold included -- otherwise there would be a way
-  /// out that skips the confirmation the hold exists to provide.
+  /// mirrors the exit button in full: a tap closes the menu, a hold exits --
+  /// otherwise there would be a way out that skips the confirmation the hold
+  /// exists to provide.
   const KEY_MAP: Record<string, PadButton> = {
     Enter: "a",
     " ": "a",
     ArrowLeft: "left",
     ArrowRight: "right",
-    ArrowUp: "left",
-    ArrowDown: "right",
+    ArrowUp: "up",
+    ArrowDown: "down",
+    Backspace: "b",
+    // The options menu. Both layouts of the same physical key, as below.
+    m: "start",
+    M: "start",
+    ь: "start",
+    Ь: "start",
     // Connect the highlighted tunnel. Both layouts of the same physical key,
     // since this machine is used with a Russian keyboard as often as a Latin one.
     x: "x",
@@ -242,7 +261,9 @@ export function useGamepad(handlers: {
   }
 
   function onKeyUp(event: KeyboardEvent) {
-    if (event.key === "Escape") keyboardHold = false;
+    if (event.key !== "Escape" || !keyboardHold) return;
+    keyboardHold = false;
+    if (!holdFired) handlers.onPress(HOLD_BUTTON);
   }
 
   /// Losing focus while holding would otherwise freeze the ring part-filled.

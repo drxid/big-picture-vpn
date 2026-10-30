@@ -1,4 +1,6 @@
-//! Discovery and control of AmneziaWG tunnels.
+//! Discovery and control of tunnels: AmneziaWG here, Happ in `happ.rs`. Everything
+//! outside this module sees one list, so a switch between the two stops one
+//! before starting the other, as it does between two AmneziaWG configs.
 //!
 //! Two facts drive the design, both established by testing against a live
 //! install rather than assumed:
@@ -26,6 +28,16 @@ use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ};
 use winreg::RegKey;
 
+use crate::happ;
+use crate::i18n::tr;
+
+const PROVIDER: &str = "amneziawg";
+
+/// What a failed operation was trying to do, as (Russian, English).
+const START: (&str, &str) = ("запустить", "start");
+const STOP: (&str, &str) = ("остановить", "stop");
+const READ_STATUS: (&str, &str) = ("прочитать статус", "read the status of");
+
 const SERVICE_PREFIX: &str = "AmneziaWGTunnel$";
 const SERVICES_KEY: &str = r"SYSTEM\CurrentControlSet\Services";
 
@@ -50,6 +62,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(150);
 pub struct Tunnel {
     /// Config name, e.g. "-PC". Note it may legitimately start with a dash.
     pub name: String,
+    /// Which client owns this tunnel; the interface picks the logo from it.
+    pub provider: &'static str,
     pub service_name: String,
     pub display_name: String,
     pub config_path: Option<String>,
@@ -80,7 +94,11 @@ struct ControlError {
     message: String,
 }
 
-fn describe(err: &windows_service::Error, action: &str, tunnel: &str) -> ControlError {
+fn describe(
+    err: &windows_service::Error,
+    (ru, en): (&str, &str),
+    tunnel: &str,
+) -> ControlError {
     let code = match err {
         windows_service::Error::Winapi(io) => io.raw_os_error(),
         _ => None,
@@ -92,7 +110,10 @@ fn describe(err: &windows_service::Error, action: &str, tunnel: &str) -> Control
     let denied = matches!(code, Some(5) | Some(1060));
     ControlError {
         denied,
-        message: format!("Не удалось {action} туннель «{tunnel}»: {err}"),
+        message: tr(
+            format!("Не удалось {ru} туннель «{tunnel}»: {err}"),
+            format!("Could not {en} tunnel \"{tunnel}\": {err}"),
+        ),
     }
 }
 
@@ -105,7 +126,12 @@ fn plain(message: String) -> ControlError {
 
 fn connect() -> Result<ServiceManager, String> {
     ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
-        .map_err(|e| format!("Нет доступа к диспетчеру служб Windows: {e}"))
+        .map_err(|e| {
+            tr(
+                format!("Нет доступа к диспетчеру служб Windows: {e}"),
+                format!("No access to the Windows service manager: {e}"),
+            )
+        })
 }
 
 /// `"C:\...\amneziawg.exe" /tunnelservice "C:\...\-PC.conf.dpapi"` -> the
@@ -138,7 +164,12 @@ pub fn list_tunnels() -> Result<Vec<Tunnel>, String> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let services = hklm
         .open_subkey_with_flags(SERVICES_KEY, KEY_READ)
-        .map_err(|e| format!("Не удалось прочитать список служб: {e}"))?;
+        .map_err(|e| {
+            tr(
+                format!("Не удалось прочитать список служб: {e}"),
+                format!("Could not read the list of services: {e}"),
+            )
+        })?;
 
     let manager = connect()?;
     let mut tunnels = Vec::new();
@@ -164,6 +195,7 @@ pub fn list_tunnels() -> Result<Vec<Tunnel>, String> {
 
         tunnels.push(Tunnel {
             name: name.to_string(),
+            provider: PROVIDER,
             service_name: service_name.clone(),
             display_name,
             config_path: extract_config_path(&image_path),
@@ -179,6 +211,7 @@ pub fn list_tunnels() -> Result<Vec<Tunnel>, String> {
             continue;
         }
         tunnels.push(Tunnel {
+            provider: PROVIDER,
             service_name: service_name_for(&name),
             display_name: name.clone(),
             name,
@@ -187,6 +220,8 @@ pub fn list_tunnels() -> Result<Vec<Tunnel>, String> {
             running: false,
         });
     }
+
+    tunnels.extend(happ::tunnel());
 
     tunnels.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(tunnels)
@@ -255,22 +290,27 @@ fn wait_for(
             Ok(service) => match service.query_status() {
                 Ok(status) if status.current_state == target => return Ok(()),
                 Ok(_) => {}
-                Err(e) => return Err(describe(&e, "прочитать статус", tunnel)),
+                Err(e) => return Err(describe(&e, READ_STATUS, tunnel)),
             },
             Err(_) => {
-                return Err(plain(format!(
-                    "Служба туннеля «{tunnel}» исчезла. AmneziaWG удаляет службу, \
-                     если конфиг не может подключиться. Проверь конфиг в AmneziaWG, \
-                     затем запусти scripts\\setup-tunnels.ps1 -Activate '{tunnel}'"
+                return Err(plain(tr(
+                    format!(
+                        "Служба туннеля «{tunnel}» исчезла. AmneziaWG удаляет службу, \
+                         если конфиг не может подключиться. Проверь конфиг в AmneziaWG."
+                    ),
+                    format!(
+                        "The service of tunnel \"{tunnel}\" disappeared. AmneziaWG removes \
+                         it when a config cannot connect. Check the config in AmneziaWG."
+                    ),
                 )))
             }
         }
 
         if Instant::now() >= deadline {
-            return Err(plain(format!(
-                "Туннель «{tunnel}» не перешёл в состояние {} за {} с",
-                state_label(target),
-                SETTLE_TIMEOUT.as_secs()
+            let (state, seconds) = (state_label(target), SETTLE_TIMEOUT.as_secs());
+            return Err(plain(tr(
+                format!("Туннель «{tunnel}» не перешёл в состояние {state} за {seconds} с"),
+                format!("Tunnel \"{tunnel}\" did not reach {state} in {seconds} s"),
             )));
         }
         sleep(POLL_INTERVAL);
@@ -287,10 +327,10 @@ fn direct_start(tunnel: &str) -> Result<(), ControlError> {
 
     let service = manager
         .open_service(&service_name, ServiceAccess::START | ServiceAccess::QUERY_STATUS)
-        .map_err(|e| describe(&e, "запустить", tunnel))?;
+        .map_err(|e| describe(&e, START, tunnel))?;
     service
         .start(&[] as &[&OsStr])
-        .map_err(|e| describe(&e, "запустить", tunnel))?;
+        .map_err(|e| describe(&e, START, tunnel))?;
 
     wait_for(&manager, &service_name, ServiceState::Running)
 }
@@ -305,10 +345,10 @@ fn direct_stop(tunnel: &str) -> Result<(), ControlError> {
 
     let service = manager
         .open_service(&service_name, ServiceAccess::STOP | ServiceAccess::QUERY_STATUS)
-        .map_err(|e| describe(&e, "остановить", tunnel))?;
+        .map_err(|e| describe(&e, STOP, tunnel))?;
     service
         .stop()
-        .map_err(|e| describe(&e, "остановить", tunnel))?;
+        .map_err(|e| describe(&e, STOP, tunnel))?;
 
     wait_for(&manager, &service_name, ServiceState::Stopped)
 }
@@ -328,6 +368,9 @@ fn service_exists(tunnel: &str) -> bool {
 }
 
 pub fn start(tunnel: &str) -> Result<(), String> {
+    if tunnel == happ::NAME {
+        return happ::start();
+    }
     // Recreating a missing service needs administrator rights, so there is no
     // point trying the direct path first -- it can only fail.
     if !service_exists(tunnel) {
@@ -341,6 +384,9 @@ pub fn start(tunnel: &str) -> Result<(), String> {
 }
 
 pub fn stop(tunnel: &str) -> Result<(), String> {
+    if tunnel == happ::NAME {
+        return happ::stop();
+    }
     // No service means AmneziaWG already removed it, i.e. the tunnel is off.
     if !service_exists(tunnel) {
         return Ok(());
@@ -396,7 +442,12 @@ struct ControlOutcome {
 /// user's profile directory.
 fn data_dir() -> Result<PathBuf, String> {
     let base = std::env::var("ProgramData")
-        .map_err(|_| "Переменная окружения ProgramData не задана".to_string())?;
+        .map_err(|_| {
+            tr(
+                "Переменная окружения ProgramData не задана",
+                "The ProgramData environment variable is not set",
+            )
+        })?;
     Ok(PathBuf::from(base).join("BigPictureVPN"))
 }
 
@@ -410,7 +461,12 @@ fn unique_id() -> (String, u64) {
     )
 }
 
-const SETUP_HINT: &str = "Запусти от администратора: scripts\\setup-scheduled-task.ps1";
+fn setup_hint() -> String {
+    tr(
+        "Переустанови приложение: так восстановится служебная задача.",
+        "Reinstall the app to restore its background task.",
+    )
+}
 
 /// Ask the scheduled task to do what this process is not allowed to do.
 ///
@@ -419,9 +475,10 @@ const SETUP_HINT: &str = "Запусти от администратора: scri
 fn via_task(action: &str, tunnel: &str) -> Result<(), String> {
     let dir = data_dir()?;
     if !dir.is_dir() {
-        return Err(format!(
-            "Нет прав на управление туннелем «{tunnel}», а служебная задача не установлена. \
-             {SETUP_HINT}"
+        let hint = setup_hint();
+        return Err(tr(
+            format!("Нет прав на управление туннелем «{tunnel}». {hint}"),
+            format!("No rights to control tunnel \"{tunnel}\". {hint}"),
         ));
     }
 
@@ -433,15 +490,25 @@ fn via_task(action: &str, tunnel: &str) -> Result<(), String> {
         issued,
     };
     let body = serde_json::to_string(&request)
-        .map_err(|e| format!("Не удалось сформировать запрос: {e}"))?;
+        .map_err(|e| {
+            tr(
+                format!("Не удалось сформировать запрос: {e}"),
+                format!("Could not build the request: {e}"),
+            )
+        })?;
 
     let request_path = dir.join("request.json");
     let result_path = dir.join("result.json");
 
     // Drop any previous answer, so a stale one cannot be mistaken for ours.
     let _ = std::fs::remove_file(&result_path);
-    std::fs::write(&request_path, body)
-        .map_err(|e| format!("Не удалось записать запрос в {}: {e}", request_path.display()))?;
+    std::fs::write(&request_path, body).map_err(|e| {
+        let path = request_path.display();
+        tr(
+            format!("Не удалось записать запрос в {path}: {e}"),
+            format!("Could not write the request to {path}: {e}"),
+        )
+    })?;
 
     run_task()?;
 
@@ -472,9 +539,10 @@ fn via_task(action: &str, tunnel: &str) -> Result<(), String> {
             run_task()?;
         }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "Служебная задача не ответила за {} с. {SETUP_HINT}",
-                TASK_TIMEOUT.as_secs()
+            let (seconds, hint) = (TASK_TIMEOUT.as_secs(), setup_hint());
+            return Err(tr(
+                format!("Служебная задача не ответила за {seconds} с. {hint}"),
+                format!("The background task did not answer in {seconds} s. {hint}"),
             ));
         }
         sleep(POLL_INTERVAL);
@@ -485,11 +553,18 @@ fn run_task() -> Result<(), String> {
     let status = Command::new("schtasks.exe")
         .args(["/run", "/tn", TASK_NAME])
         .status()
-        .map_err(|e| format!("Не удалось запустить служебную задачу: {e}. {SETUP_HINT}"))?;
+        .map_err(|e| {
+            let hint = setup_hint();
+            tr(
+                format!("Не удалось запустить служебную задачу: {e}. {hint}"),
+                format!("Could not start the background task: {e}. {hint}"),
+            )
+        })?;
     if !status.success() {
-        return Err(format!(
-            "Служебная задача не запустилась (код {}). {SETUP_HINT}",
-            status.code().unwrap_or(-1)
+        let (code, hint) = (status.code().unwrap_or(-1), setup_hint());
+        return Err(tr(
+            format!("Служебная задача не запустилась (код {code}). {hint}"),
+            format!("The background task did not start (code {code}). {hint}"),
         ));
     }
     Ok(())

@@ -12,8 +12,15 @@ const props = withDefaults(
     /// Per-character delay. Long lines need a smaller step, or the tail of the
     /// sentence is still arriving seconds after the head.
     stagger?: number;
+    /// A logo set into the line as one more character, placed before the
+    /// character at `iconAt`, so it arrives and leaves with the letters.
+    icon?: string;
+    iconAt?: number;
+    iconHeight?: string;
+    /// Characters from here on are drawn in the full text colour.
+    brightFrom?: number;
   }>(),
-  { stagger: 32 },
+  { stagger: 32, iconHeight: "1.25em" },
 );
 
 /// Split into characters, keeping spaces as their own cells so the stagger
@@ -48,14 +55,23 @@ const leaveDuration = computed(
       :aria-label="text"
       :style="{ '--step': `${stagger}ms` }"
     >
-      <span
-        v-for="(char, index) in chars"
-        :key="`${index}-${char}`"
-        class="char"
-        :style="{ '--i': index }"
-        aria-hidden="true"
-        >{{ char === " " ? " " : char }}</span
-      >
+      <template v-for="(char, index) in chars" :key="`${index}-${char}`">
+        <img
+          v-if="icon && index === iconAt"
+          class="char icon"
+          :src="icon"
+          :style="{ '--i': index, height: iconHeight }"
+          alt=""
+          aria-hidden="true"
+        />
+        <span
+          class="char"
+          :class="{ bright: brightFrom !== undefined && index >= brightFrom }"
+          :style="{ '--i': index }"
+          aria-hidden="true"
+          >{{ char === " " ? " " : char }}</span
+        >
+      </template>
     </span>
   </Transition>
 </template>
@@ -63,6 +79,7 @@ const leaveDuration = computed(
 <style scoped>
 .word {
   display: inline-flex;
+  align-items: center;
   /* Letters are laid out individually, so the browser cannot kern across them;
      the negative tracking on the heading compensates. */
   white-space: pre;
@@ -71,6 +88,20 @@ const leaveDuration = computed(
 .char {
   display: inline-block;
   will-change: transform, opacity, filter;
+}
+
+.bright {
+  color: var(--text);
+}
+
+/* Centring the box leaves a logo sitting high: capitals are centred below the
+   middle of the line box, which also reserves room for descenders. `top`, not
+   `transform`, because the letter animation owns that. */
+.icon {
+  position: relative;
+  top: 0.05em;
+  width: auto;
+  margin-right: 0.35em;
 }
 
 /* Leaving: letters fall away front to back, quickly. */
