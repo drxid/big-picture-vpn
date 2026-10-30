@@ -1,6 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "big-picture-vpn",
+  "productName": "Big Picture VPN",
+  "mainBinaryName": "BigPictureVPN",
   "version": "0.1.0",
   "identifier": "com.bigpicturevpn.app",
   "build": {
@@ -28,7 +29,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,6 +41,21 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "resources": {
+      "../scripts/setup-scheduled-task.ps1": "scripts/setup-scheduled-task.ps1",
+      "../scripts/tunnel-control.ps1": "scripts/tunnel-control.ps1"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "windows/hooks.nsh",
+        "languages": [
+          "Russian",
+          "English"
+        ],
+        "displayLanguageSelector": false
+      }
     }
   }
 }

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Gamepad-driven AmneziaWG VPN toggle for Steam Big Picture",
+  "description": "Gamepad-driven AmneziaWG and Happ VPN toggle for Steam Big Picture",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
